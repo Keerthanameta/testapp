@@ -1,11 +1,40 @@
+import crypto from "node:crypto";
 import express from "express";
 
 const app = express();
-app.use(express.json());
 
-const PORT = process.env.PORT || 10000;
+// Capture the raw body so the X-Hub-Signature-256 HMAC can be verified.
+app.use(
+  express.json({
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
+
+const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "vibecode";
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
+const APP_SECRET = process.env.APP_SECRET;
+
+if (!APP_SECRET) {
+  console.warn("WARNING: APP_SECRET not set — webhook signatures NOT verified");
+}
+
+// ---------- Signature verification ----------
+function verifySignature(req) {
+  if (!APP_SECRET) return true; // skipped when no secret is configured
+  const header = req.get("x-hub-signature-256");
+  if (!header || !req.rawBody) return false;
+
+  const expected =
+    "sha256=" +
+    crypto.createHmac("sha256", APP_SECRET).update(req.rawBody).digest("hex");
+
+  const a = Buffer.from(header);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 
 // ---------- Webhook verification (GET) ----------
 app.get("/webhook", (req, res) => {
@@ -23,11 +52,34 @@ app.get("/webhook", (req, res) => {
 
 // ---------- Receive events (POST) ----------
 app.post("/webhook", async (req, res) => {
+  if (!verifySignature(req)) {
+    console.error("Invalid webhook signature — rejecting");
+    return res.sendStatus(403);
+  }
+
   res.sendStatus(200); // ACK immediately
 
-  console.log("INCOMING:", JSON.stringify(req.body, null, 2));
+  console.log("Incoming webhook message:", JSON.stringify(req.body, null, 2));
 
   const value = req.body?.entry?.[0]?.changes?.[0]?.value;
+
+  // ---------- STATUS updates: sent / delivered / read / failed ----------
+  const statuses = value?.statuses ?? [];
+  if (statuses.length > 0) {
+    for (const status of statuses) {
+      const ts = new Date(Number(status.timestamp) * 1000).toISOString();
+      console.log(
+        `STATUS: ${status.status.toUpperCase()} | wamid: ${status.id} | ` +
+          `to: ${status.recipient_id} | at: ${ts}`
+      );
+      if (status.status === "failed") {
+        console.error("FAILED DETAILS:", JSON.stringify(status.errors, null, 2));
+      }
+    }
+    return; // status payloads contain no messages
+  }
+
+  // ---------- INCOMING messages ----------
   const msg = value?.messages?.[0];
   if (!msg) return;
 
@@ -59,14 +111,19 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// ---------- Helper ----------
+// ---------- Health check ----------
+app.get("/", (req, res) => {
+  res.send("Webhook app is running");
+});
+
+// ---------- Helper: send a text message ----------
 async function sendText(phoneNumberId, to, body) {
   const url = `https://graph.facebook.com/v26.0/${phoneNumberId}/messages`;
   const r = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: Bearer ${WHATSAPP_TOKEN},
+      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
     },
     body: JSON.stringify({
       messaging_product: "whatsapp",
@@ -80,5 +137,5 @@ async function sendText(phoneNumberId, to, body) {
 }
 
 app.listen(PORT, () => {
-  console.log(Your service is live on port ${PORT});
+  console.log(`Your service is live on port ${PORT}`);
 });
