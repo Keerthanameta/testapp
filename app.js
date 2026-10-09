@@ -46,6 +46,11 @@ app.get("/webhook", (req, res) => {
     console.log("WEBHOOK VERIFIED");
     res.status(200).send(challenge);
   } else {
+    console.error(
+      `Verification failed | mode: ${JSON.stringify(mode)} | ` +
+      `received token length: ${token?.length} | expected length: ${VERIFY_TOKEN.length} | ` +
+      `match: ${token === VERIFY_TOKEN}`
+    );
     res.sendStatus(403);
   }
 });
