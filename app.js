@@ -17,6 +17,7 @@ app.get("/webhook", (req, res) => {
     console.log("WEBHOOK VERIFIED");
     res.status(200).send(challenge);
   } else {
+    console.error("Verification failed — token did not match");
     res.sendStatus(403);
   }
 });
