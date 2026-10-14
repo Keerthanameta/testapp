@@ -7,25 +7,24 @@ const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "vibecode";
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 
-// ---------- Webhook verification (GET) ----------
-app.get("/webhook", (req, res) => {
+// ---------- Shared handlers ----------
+
+function verifyWebhook(req, res, name) {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
   if (mode === "subscribe" && token === VERIFY_TOKEN) {
-    console.log("WEBHOOK VERIFIED");
+    console.log(`WEBHOOK VERIFIED -> /${name}`);
     res.status(200).send(challenge);
   } else {
     console.error("Verification failed — token did not match");
     res.sendStatus(403);
   }
-});
+}
 
-// ---------- Receive events (POST) ----------
-app.post("/webhook", async (req, res) => {
+async function handleWebhook(req, res) {
   res.sendStatus(200); // ACK immediately
-
   console.log("Incoming webhook message:", JSON.stringify(req.body, null, 2));
 
   const value = req.body?.entry?.[0]?.changes?.[0]?.value;
@@ -76,7 +75,13 @@ app.post("/webhook", async (req, res) => {
       "No problem! 👍 Message us any time if you change your mind."
     );
   }
-});
+}
+
+// ---------- Register all 3 endpoints ----------
+for (const name of ["webhook", "waba", "phonenumber"]) {
+  app.get(`/${name}`, (req, res) => verifyWebhook(req, res, name));
+  app.post(`/${name}`, handleWebhook);
+}
 
 // ---------- Health check ----------
 app.get("/", (req, res) => {
